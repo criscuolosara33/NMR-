@@ -232,9 +232,9 @@ class SpinSystemEngine:
             rep = nucs[0]
             integral = len(nucs)
             if rep.is_exchangeable:
-                signals.append(self._format_signal(rep, integral, nucs, 'br s', [], [], "**Singoletto allargato**: Protone soggetto a scambio chimico. Accoppiamenti collassati."))
+                signals.append(self._format_signal(rep, integral, nucs, 'br s', [], [], "**Singoletto allargato**: Protone soggetto a scambio chimico. Accoppiamenti collassati.", None))
                 continue
-
+                
             j_vicini = []
             coupled_nuclei = []
             for target_id, j_val in rep.couplings.items():
