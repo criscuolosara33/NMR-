@@ -47,6 +47,18 @@ st.markdown(f"""
         box-shadow: 0 4px 6px rgba(107, 20, 34, 0.2);
     }}
     hr {{ margin-top: 1.5em; margin-bottom: 1.5em; border-color: #e6e6e6; }}
+    
+    /* Box Dettagli Segnale Grigio */
+    .signal-details-box {{
+        background-color: #f0f0f0; 
+        border: 1px solid #a9a9a9; 
+        border-left: 5px solid #4f4f4f; 
+        padding: 15px; 
+        border-radius: 4px; 
+        color: #333333; 
+        font-size: 15px; 
+        height: 100%;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -90,16 +102,16 @@ def analizza_stereochimica(mol):
     commenti = []
     chiral_centers = Chem.FindMolChiralCenters(mol, includeUnassigned=True)
     if chiral_centers:
-        dett_chirali = [f"C{idx + 1} ({c})" if c in ['R', 'S'] else f"C{idx + 1} (Stereochimica Ambicua/Non Definita)" for idx, c in chiral_centers]
-        commenti.append(f"**Centri stereogenici**: Rilevati agli atomi {', '.join(dett_chirali)}.")
+        dett_chirali = [f"C{idx + 1} ({c})" if c in ['R', 'S'] else f"C{idx + 1} (Stereochimica Non Definita)" for idx, c in chiral_centers]
+        commenti.append(f"**Centri stereogenici**: {', '.join(dett_chirali)}.")
         ch2_dias = [str(atom.GetIdx() + 1) for atom in mol.GetAtoms() if atom.GetAtomicNum() == 6 and atom.GetTotalNumHs() == 2]
-        if ch2_dias: commenti.append(f"**Protoni diastereotopici**: I gruppi metilenici ({', '.join(ch2_dias)}) risiedono in un intorno chirale. I protoni sono anisocroni e presentano un accoppiamento geminale attivo ($^2J$).")
+        if ch2_dias: commenti.append(f"**Protoni diastereotopici**: I metileni ({', '.join(ch2_dias)}) risiedono in intorno chirale. Anisocroni con accoppiamento geminale attivo ($^2J$).")
     else:
-        commenti.append("**Topologia achirale**: La molecola non presenta centri stereogenici definiti. I gruppi metilenici contengono protoni enantiotopici (isocroni in mezzi achirali).")
+        commenti.append("**Topologia achirale**: Nessun centro stereogenico definito. I metileni contengono protoni enantiotopici.")
     
     dett_ez = [f"C{b.GetBeginAtomIdx()+1}=C{b.GetEndAtomIdx()+1} ({'E' if b.GetStereo()==Chem.BondStereo.STEREOE else 'Z'})" 
                for b in mol.GetBonds() if b.GetBondType() == Chem.BondType.DOUBLE and b.GetStereo() in [Chem.BondStereo.STEREOE, Chem.BondStereo.STEREOZ]]
-    if dett_ez: commenti.append(f"**Isomeria geometrica**: Rilevati doppi legami con configurazione {', '.join(dett_ez)}.")
+    if dett_ez: commenti.append(f"**Isomeria geometrica**: {', '.join(dett_ez)}.")
     return commenti
 
 def analizza_simmetria_equivalenza(mol):
@@ -110,19 +122,17 @@ def analizza_simmetria_equivalenza(mol):
     for atom in mol_h.GetAtoms():
         r = ranks[atom.GetIdx()]
         if atom.GetAtomicNum() == 6:
-            if r not in gruppi_c: gruppi_c[r] = []
-            gruppi_c[r].append(str(atom.GetIdx() + 1))
+            gruppi_c.setdefault(r, []).append(str(atom.GetIdx() + 1))
         elif atom.GetAtomicNum() == 1:
             idx_str = str(atom.GetNeighbors()[0].GetIdx() + 1)
-            if r not in gruppi_h: gruppi_h[r] = []
-            gruppi_h[r].append(idx_str)
+            gruppi_h.setdefault(r, []).append(idx_str)
 
     equiv_c = [g for g in gruppi_c.values() if len(g) > 1]
-    if equiv_c: commenti.append(f"**Equivalenza Chimica (13C)**: Operazioni di simmetria del primo ordine correlano i carboni: " + " | ".join([f"({', '.join(g)})" for g in equiv_c]) + ".")
+    if equiv_c: commenti.append(f"**Equivalenza Chimica (13C)**: Correlazione per simmetria: " + " | ".join([f"({', '.join(g)})" for g in equiv_c]) + ".")
     equiv_h = [g for g in gruppi_h.values() if len(g) > 1 and len(set(g)) > 1]
     if equiv_h:
         equiv_h_formattati = [f"({', '.join(set(g))})" for g in equiv_h]
-        commenti.append(f"**Equivalenza Chimica (1H)**: Operazioni di simmetria correlano i protoni legati ai carboni: {' | '.join(equiv_h_formattati)}.")
+        commenti.append(f"**Equivalenza Chimica (1H)**: Correlazione per simmetria: {' | '.join(equiv_h_formattati)}.")
     return commenti
 
 # --- ARCHITETTURA OOP PER SPIN SYSTEM ED EQUIVALENZA ---
@@ -219,20 +229,6 @@ class SpinSystemEngine:
                 for mn in m_nucs: mn.mag_eq = mag_eq_counter
                 mag_eq_counter += 1
 
-        visited = set()
-        for nuc_id in self.nuclei:
-            if nuc_id not in visited and not self.nuclei[nuc_id].is_exchangeable:
-                system = []
-                queue = [nuc_id]
-                while queue:
-                    curr = queue.pop(0)
-                    if curr not in visited:
-                        visited.add(curr)
-                        system.append(curr)
-                        for neighbor in self.nuclei[curr].couplings:
-                            if neighbor not in visited: queue.append(neighbor)
-                if system: self.spin_systems_graphs.append(system)
-
     def get_signals_for_ui(self):
         signals = []
         gruppi_mag = {}
@@ -243,7 +239,7 @@ class SpinSystemEngine:
             rep = nucs[0]
             integral = len(nucs)
             if rep.is_exchangeable:
-                signals.append(self._format_signal(rep, integral, nucs, 'br s', [], "**Singoletto allargato**: Protone soggetto a scambio chimico rapido; gli accoppiamenti vicinali sono soppressi."))
+                signals.append(self._format_signal(rep, integral, nucs, 'br s', [], [], "**Singoletto allargato**: Protone soggetto a scambio chimico rapido; accoppiamenti soppressi."))
                 continue
 
             j_vicini = []
@@ -253,7 +249,7 @@ class SpinSystemEngine:
 
             commento_ordine = ""
             if rep.chem_eq != rep.mag_eq:
-                commento_ordine = "<br><br>- <b>Sistema Second-Order</b>: I nuclei appartengono alla stessa classe di equivalenza chimica ma differiscono per equivalenza magnetica (es. sistemi AA'BB'). Il multipletto reale sarà più complesso."
+                commento_ordine = "<br><br>- <b>Sistema Second-Order</b>: I nuclei sono chimicamente equivalenti ma differiscono per equivalenza magnetica (es. sistemi AA'BB'). Il multipletto reale sarà asimmetrico."
             else:
                 for target_id, j_val in rep.couplings.items():
                     delta_nu = abs(rep.shift - self.nuclei[target_id].shift) * self.freq
@@ -261,34 +257,43 @@ class SpinSystemEngine:
                         commento_ordine = f"<br><br>- <b>Accoppiamento Forte</b>: Rilevato basso rapporto Δν/J ≈ {delta_nu/j_val:.1f}. Il sistema devia dall'approssimazione del prim'ordine (distorsione di intensità/effetto tetto)."
                         break
 
-            j_details = []
-            for j in j_vicini:
-                if j == 12.0: j_details.append(f"{j} Hz (Geminale, $^2J$)")
-                elif j == 7.5: j_details.append(f"{j} Hz (Vicinale/Orto, $^3J$)")
-                elif j == 2.0: j_details.append(f"{j} Hz (Meta/Long-range, $^4J$)")
-                else: j_details.append(f"{j} Hz")
+            # Analisi complessa dei multipletti
+            counts = {}
+            for jv in j_vicini: counts[jv] = counts.get(jv, 0) + 1
             
-            j_str = f"<br><br><b>Costanti J rilevate:</b> {', '.join(j_details)}" if j_details else ""
+            tree_chars = []
+            tree_js = []
+            for jv, num in counts.items():
+                char = {1:'d', 2:'t', 3:'q'}.get(num, 'm')
+                tree_chars.append(char)
+                tree_js.append(jv)
+                
+            if not tree_chars: mult = 's'
+            elif 'm' in tree_chars or sum(counts.values()) > 6: mult = 'm'
+            else: mult = "".join(tree_chars)
 
-            if not j_vicini: mult = 's'
-            elif len(j_vicini) == 1: mult = 'd'
-            else:
-                counts = {}
-                for jv in j_vicini: counts[jv] = counts.get(jv, 0) + 1
-                chars = [{1:'d', 2:'t', 3:'q'}.get(num, 'm') for num in counts.values()]
-                mult = 'm' if 'm' in chars or sum(counts.values()) > 6 else "".join(chars)
+            # Costruzione testo per i J
+            j_details = []
+            for char, jv in zip(tree_chars, tree_js):
+                tipo = "Geminale, $^2J$" if jv == 12.0 else "Vicinale/Orto, $^3J$" if jv == 7.5 else "Meta/Long-range, $^4J$" if jv == 2.0 else "Non standard"
+                if char == 'd': j_details.append(f"Doppietto (J = {jv} Hz, {tipo})")
+                elif char == 't': j_details.append(f"Tripletto (J = {jv} Hz, {tipo})")
+                elif char == 'q': j_details.append(f"Quartetto (J = {jv} Hz, {tipo})")
+                elif char == 'm': j_details.append(f"Multipletto (J = {jv} Hz, {tipo})")
+            
+            j_str = "<br><br><b>Scomposizione dell'albero di splitting:</b><br> - " + "<br> - ".join(j_details) if j_details else ""
 
             base_comment = self._descrivi_mult(mult)
-            signals.append(self._format_signal(rep, integral, nucs, mult, j_vicini, base_comment + commento_ordine + j_str))
+            signals.append(self._format_signal(rep, integral, nucs, mult, tree_chars, tree_js, base_comment + commento_ordine + j_str))
             
         return signals
 
     def _descrivi_mult(self, mult):
-        diz = {'s': "**Singoletto**: Nessun accoppiamento vicinale rilevato.", 
-               'd': "**Doppietto**: Accoppiamento con un nucleo magneticamente equivalente.", 
+        diz = {'s': "**Singoletto**: Nessun accoppiamento vicino.", 
+               'd': "**Doppietto**: Accoppiamento con un nucleo.", 
                't': "**Tripletto**: Accoppiamento con due nuclei equivalenti.", 
                'q': "**Quartetto**: Accoppiamento con tre nuclei equivalenti.", 
-               'm': "**Multipletto**: Sovrapposizione complessa di stati di spin."}
+               'm': "**Multipletto**: Sovrapposizione complessa."}
         if mult in diz: return diz[mult]
         
         nomi = {'d': "Doppietto", 't': "Tripletto", 'q': "Quartetto"}
@@ -298,9 +303,9 @@ class SpinSystemEngine:
             return f"**{nomi[mult[0]]} di {plur[mult[1]]}**: Risoluzione dello splitting tree con costanti J distinte."
         elif len(mult) == 3 and all(c in nomi for c in mult): 
             return f"**{nomi[mult[0]]} di {plur[mult[1]]} di {plur[mult[2]]}**: Splitting tree triplo."
-        return "**Multipletto complesso**: Generato dalla cascata di accoppiamenti di prim'ordine multipli."
+        return "**Multipletto complesso**: Generato da cascata di accoppiamenti."
 
-    def _format_signal(self, rep, integral, nucs, mult, j_vals, comment):
+    def _format_signal(self, rep, integral, nucs, mult, tree_chars, tree_js, comment):
         sig = {
             'delta': rep.shift,
             'multiplicity': mult,
@@ -309,13 +314,20 @@ class SpinSystemEngine:
             'h_atoms': [n.id for n in nucs],
             'is_exchangeable': rep.is_exchangeable,
             'coupling_comment': comment,
-            'mag_eq': rep.mag_eq,
-            'chem_eq': rep.chem_eq
+            'tree_chars': tree_chars,
+            'tree_js': tree_js
         }
-        sig['sub_peaks'] = self._genera_sotto_picchi(sig['delta'], mult, float(integral), self.freq, j_vals)
+        
+        # Rigenerazione per plotting basata su j_vals piatte
+        flat_j_vals = []
+        for c, jv in zip(tree_chars, tree_js):
+            num = {'d':1, 't':2, 'q':3, 'm':4}.get(c, 1)
+            flat_j_vals.extend([jv]*num)
+            
+        sig['sub_peaks'] = self._genera_sotto_picchi(sig['delta'], mult, float(integral), self.freq, flat_j_vals)
         return sig
 
-    def _genera_sotto_picchi(self, center, mult, integral, freq, j_vals):
+    def _genera_sotto_picchi(self, center, mult, integral, freq, flat_j_vals):
         if mult in ['s', 'br s']: return [(center, integral)]
         if mult == 'm':
             j_std = 7.5 / freq
@@ -331,13 +343,48 @@ class SpinSystemEngine:
         picchi = [(center, integral)]
         chars = [c for c in mult if c in 'dtq']
         for i, c in enumerate(chars):
-            j = j_vals[i] if i < len(j_vals) else 7.5
+            j = flat_j_vals[i] if i < len(flat_j_vals) else 7.5
             nuovi_picchi = []
             off, rat = ottieni_offset(c, j)
             for p_shift, p_int in picchi:
                 for o, r in zip(off, rat): nuovi_picchi.append((p_shift + o, p_int * r))
             picchi = nuovi_picchi
         return picchi
+
+def crea_figura_splitting_tree(chars, j_vals):
+    fig = plt.figure(figsize=(2.5, 2.0), dpi=100)
+    ax = fig.add_subplot(111)
+    
+    nodes = [(0, 0)]
+    ax.plot([0, 0], [0.5, 0], color='black', lw=1)
+    
+    y_current = 0
+    for char, j in zip(chars, j_vals):
+        new_nodes = []
+        y_next = y_current - 1
+        for nx, ny in nodes:
+            if char == 'd': off = [-j/2, j/2]
+            elif char == 't': off = [-j, 0, j]
+            elif char == 'q': off = [-1.5*j, -0.5*j, 0.5*j, 1.5*j]
+            else: off = [-j, j]
+            
+            for o in off:
+                new_x = nx + o
+                new_nodes.append((new_x, y_next))
+                ax.plot([nx, new_x], [ny, y_next], color=BORDEAUX, lw=1.5)
+        nodes = new_nodes
+        y_current = y_next
+        
+    for nx, ny in nodes:
+        ax.plot([nx, nx], [ny, ny-0.4], color='black', lw=2)
+        
+    ax.set_yticks([])
+    ax.set_xticks([])
+    for spine in ['top', 'right', 'left', 'bottom']: ax.spines[spine].set_visible(False)
+    fig.patch.set_alpha(0)
+    ax.patch.set_alpha(0)
+    plt.tight_layout()
+    return fig
 
 def stima_locale_13c(mol_no_h):
     ranks = list(Chem.CanonicalRankAtoms(mol_no_h, breakTies=False))
@@ -378,6 +425,26 @@ def salva_pagina_uniforme(pdf, fig):
 
 # --- UI MAIN ---
 st.title("NMR Laboratory (Interactive Platform)")
+
+with st.expander("📖 Tutorial e Legenda delle Funzionalità - Come usare la piattaforma"):
+    st.markdown("""
+    **1. Editor Strutturale (Ketcher)**
+    * Disegna la molecola utilizzando l'editor. Assicurati di specificare correttamente l'isomeria (doppi legami E/Z e cunei per gli stereocentri R/S) in quanto il motore ne terrà conto per rilevare protoni diastereotopici.
+    
+    **2. Parametri di Acquisizione**
+    * Seleziona la **frequenza** (es. 500 MHz) e il **solvente deuterato**. Il solvente determinerà quali protoni labili (es. -OH, -NH2) subiranno lo scambio chimico (scomparendo nello spettro).
+    * Scegli la tecnica: **1H-NMR**, **13C-NMR** (Broadband, APT, DEPT) o mappa bidimensionale **COSY**.
+    
+    **3. Tabella delle Assegnazioni e Interattività**
+    * La tabella elenca tutti i segnali previsti. **Clicca su una riga qualsiasi** per attivare il motore diagnostico:
+        * La molecola illuminerà in bordeaux opaco i nuclei esatti responsabili del segnale.
+        * Sullo spettro apparirà un riquadro che evidenzierà visivamente l'area del multipletto.
+        * Verrà mostrato un **box descrittivo** (su sfondo grigio) con i dettagli di accoppiamento (costanti $J$, tipologia di interazione orto/meta/geminale, deviazioni del second'ordine).
+        * Per i multipletti complessi (es. doppietti di tripletti), il sistema disegnerà dinamicamente lo **Splitting Tree (Albero vettoriale)** per confermare visivamente la genesi della molteplicità.
+    
+    **4. Esportazione Dati**
+    * In fondo alla pagina troverai un pulsante per scaricare il **Report PDF**. Il report cattura l'esatto stato del tuo schermo, inclusa la molecola evidenziata, la tabella e tutte le espansioni dei multipletti.
+    """)
 
 smiles = st_ketcher()
 
@@ -460,9 +527,8 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                 num_chem = len(set([n.chem_eq for n in engine.nuclei.values() if not n.is_exchangeable]))
                 num_mag = len(set([n.mag_eq for n in engine.nuclei.values() if not n.is_exchangeable]))
                 st.write(f"- **Classi di Equivalenza**: {num_chem} gruppi isocroni chimicamente; {num_mag} gruppi magneticamente equivalenti.")
-                st.write(f"- **Sistemi di Spin**: Individuate {len(engine.spin_systems_graphs)} reti di spin mutuamente accoppiate e indipendenti.")
+                st.write(f"- **Sistemi di Spin**: Individuate {len(engine.spin_systems_graphs)} reti di spin mutuamente accoppiate.")
 
-        # Pre-calcolo delle coordinate spettro 1D
         x_ppm = np.linspace(x_range[0], x_range[1], int(freq * 200))
         gamma_base = 0.0025 * (500.0 / freq) if nmr_type == '1h' else 0.5
         y_intensity = np.zeros_like(x_ppm)
@@ -489,7 +555,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
         y_min = min(y_intensity) * 1.15 if min(y_intensity) < 0 else 0
         y_max = max(y_intensity) * 1.15 if np.any(y_intensity) else 1
 
-        # --- PREPARAZIONE DATI PER TABELLA PULITA ---
         df_data = []
         original_comments = {} 
         
@@ -505,7 +570,11 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             if scambiato: note_acc = f"Protone scambiato attivamente in solvente deuterato {solv}."
             
             shift_val = float(sig['delta'])
-            original_comments[shift_val] = note_acc
+            original_comments[shift_val] = {
+                'text': note_acc,
+                'tree_chars': sig.get('tree_chars', []),
+                'tree_js': sig.get('tree_js', [])
+            }
             
             row = {
                 'Shift (ppm)': "N/D" if scambiato or scomparso_dept else f"{shift_val:.2f}",
@@ -585,6 +654,8 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             
             selected_atoms, selected_delta, selected_mult = [], None, ""
             long_comment = ""
+            tree_chars = []
+            tree_js = []
             width_box = 0
             
             if len(event.selection.rows) > 0:
@@ -596,7 +667,10 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                 try: 
                     selected_delta = float(row_data['Shift (ppm)'])
                     selected_mult = row_data['Molteplicità']
-                    long_comment = original_comments.get(selected_delta, "")
+                    pack = original_comments.get(selected_delta, {})
+                    long_comment = pack.get('text', "")
+                    tree_chars = pack.get('tree_chars', [])
+                    tree_js = pack.get('tree_js', [])
                 except ValueError: selected_delta = None
 
             with col_mol:
@@ -630,15 +704,30 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             if selected_delta is not None:
                 st.markdown("---")
                 st.markdown(f"### Dettaglio del Segnale a {selected_delta:.2f} ppm")
-                c_testo, c_zoom = st.columns([0.65, 0.35])
+                
+                # Se c'è l'albero di splitting, usiamo tre colonne, altrimenti due
+                if tree_chars and len(tree_chars) > 0 and 'm' not in tree_chars and selected_mult not in ['s', 'br s']:
+                    c_testo, c_tree, c_zoom = st.columns([0.45, 0.3, 0.25])
+                    has_tree = True
+                else:
+                    c_testo, c_zoom = st.columns([0.65, 0.35])
+                    has_tree = False
+                    
                 with c_testo:
                     st.markdown(f"""
-                    <div style="background-color: #f5f5f5; border: 1px solid #d3d3d3; border-left: 5px solid #6c757d; padding: 15px; border-radius: 4px; color: #333333; font-size: 15px; height: 100%;">
+                    <div class="signal-details-box">
                         {long_comment}
                     </div>
                     """, unsafe_allow_html=True)
+                
+                if has_tree:
+                    with c_tree:
+                        fig_tree = crea_figura_splitting_tree(tree_chars, tree_js)
+                        st.pyplot(fig_tree)
+                        plt.close(fig_tree)
+
                 with c_zoom:
-                    fig_singolo_zoom = plt.figure(figsize=(3, 1.5), dpi=100)
+                    fig_singolo_zoom = plt.figure(figsize=(2.5, 1.5), dpi=100)
                     ax_zoom = fig_singolo_zoom.add_subplot(111)
                     ax_zoom.plot(x_ppm, y_intensity, color=BORDEAUX, linewidth=2.0)
                     molt_f = len(selected_mult) if len(selected_mult) > 0 else 1
@@ -673,7 +762,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             pdf_buffer = io.BytesIO()
             with PdfPages(pdf_buffer) as pdf:
                 
-                # Pagina 1: Struttura Base/Evidenziata
                 fig_mol_pdf = plt.figure(dpi=300)
                 ax_mol_pdf = fig_mol_pdf.add_subplot(111)
                 for atom in mol.GetAtoms(): atom.SetProp('atomNote', str(atom.GetIdx() + 1))
@@ -690,7 +778,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                 ax_mol_pdf.axis('off')
                 salva_pagina_uniforme(pdf, fig_mol_pdf)
                 
-                # Pagina 2: Tabella Assegnazioni
                 fig_tab_pdf = plt.figure(dpi=300)
                 ax_tab_pdf = fig_tab_pdf.add_subplot(111)
                 ax_tab_pdf.axis('off')
@@ -702,7 +789,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                 tab.scale(1, 1.5)
                 salva_pagina_uniforme(pdf, fig_tab_pdf)
 
-                # Pagina 3: Spettro Globale (Evidenziato se selezionato)
                 fig_spec_pdf = plt.figure(dpi=300)
                 ax_spec_pdf = fig_spec_pdf.add_subplot(111)
                 ax_spec_pdf.plot(x_ppm, y_intensity, color=BORDEAUX, linewidth=1.5)
@@ -717,7 +803,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                 for sp in ['top', 'right']: ax_spec_pdf.spines[sp].set_visible(False)
                 salva_pagina_uniforme(pdf, fig_spec_pdf)
 
-                # Pagina 4: Zoom di tutti i multipletti
                 if nmr_type == '1h' and len(segnali_visibili) > 0:
                     fig_zoom_pdf, axes = plt.subplots(1, len(segnali_visibili), dpi=300, figsize=(max(3 * len(segnali_visibili), 6), 3.5))
                     if len(segnali_visibili) == 1: axes = [axes]
