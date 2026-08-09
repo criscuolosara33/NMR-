@@ -66,6 +66,17 @@ def calcola_proprieta(mol):
         'mol_h': mol_h, 'mol_no_h': mol
     }
 
+def ottieni_nomi_pubchem(smiles):
+    try:
+        url_iupac = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{requests.utils.quote(smiles)}/property/IUPACName/JSON"
+        res_iupac = requests.get(url_iupac, timeout=5)
+        iupac = res_iupac.json()['PropertyTable']['Properties'][0]['IUPACName'] if res_iupac.status_code == 200 else "N/D"
+        url_syn = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{requests.utils.quote(smiles)}/synonyms/JSON"
+        res_syn = requests.get(url_syn, timeout=5)
+        comune = res_syn.json()['InformationList']['Information'][0]['Synonym'][0] if res_syn.status_code == 200 else "N/D"
+        return iupac, comune
+    except Exception: return "Errore connessione", "Errore connessione"
+
 def analizza_stereochimica(mol):
     Chem.AssignStereochemistry(mol, cleanIt=True, force=True, flagPossibleStereoCenters=True)
     commenti = []
@@ -430,6 +441,26 @@ if smiles != st.session_state.ultimo_smiles:
     st.session_state.stato_app = "input"
 
 if st.session_state.stato_app == "input":
+    
+    iupac, comune = ottieni_nomi_pubchem(st.session_state.ultimo_smiles) if st.session_state.ultimo_smiles else ("N/D", "N/D")
+    if st.session_state.ultimo_smiles:
+        mol_temp = Chem.MolFromSmiles(st.session_state.ultimo_smiles)
+        if mol_temp:
+            props_temp = calcola_proprieta(mol_temp)
+            st.markdown("---")
+            st.markdown("### Dettagli Molecolari")
+            st.markdown(f"**Nomenclatura IUPAC**: {iupac}<br>**Nome Comune**: {comune}", unsafe_allow_html=True)
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Formula Molecolare", props_temp['formula'])
+            c2.metric("Massa Molare", f"{props_temp['mw']:.2f} g/mol")
+            c3.metric("DBE (Insaturazioni)", f"{props_temp['dbe']:.1f}")
+            
+            st.latex(rf"DBE = {props_temp['formula_dbe_str']}")
+            st.latex(rf"DBE = {props_temp['formula_dbe_val_str']} = {props_temp['dbe']:.1f}")
+            st.caption("La formula per il DBE considera gli atomi tetravalenti (C, Si) + 1, sottrae la metà dei monovalenti (H, alogeni) e aggiunge la metà dei trivalenti (N, P). Gli atomi bivalenti (O, S) non influenzano il computo formale.")
+    
+    st.markdown("---")
     st.markdown("### Impostazioni Spettrometro")
     c1, c2, c3 = st.columns(3)
     freq_1h = c1.selectbox("Frequenza (MHz)", [300.0, 400.0, 500.0, 600.0, 800.0, 1000.0], index=2)
@@ -455,7 +486,7 @@ if st.session_state.stato_app == "input":
     if cb2.button("Acquisisci Spettro 13C", use_container_width=True):
         if not smiles: st.error("Disegna una molecola.")
         else:
-            st.session_state.parametri = {'freq': freq_13c, 'solvente': solv_13c, 'tech': modo_13c}
+            st.session_state.parametri = {'freq': freq_1h/4, 'solvente': solv_1h, 'tech': 'Broadband'} 
             st.session_state.stato_app = "calcolo_13c"
             st.rerun()
             
@@ -475,8 +506,22 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
     if mol is None: st.error("Struttura non valida.")
     else:
         props = calcola_proprieta(mol)
+        iupac, comune = ottieni_nomi_pubchem(st.session_state.ultimo_smiles)
         p = st.session_state.parametri
         
+        st.markdown("---")
+        st.markdown("### Dettagli Molecolari")
+        st.markdown(f"**Nomenclatura IUPAC**: {iupac}<br>**Nome Comune**: {comune}", unsafe_allow_html=True)
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Formula Molecolare", props['formula'])
+        c2.metric("Massa Molare", f"{props['mw']:.2f} g/mol")
+        c3.metric("DBE (Insaturazioni)", f"{props['dbe']:.1f}")
+        
+        st.latex(rf"DBE = {props['formula_dbe_str']}")
+        st.latex(rf"DBE = {props['formula_dbe_val_str']} = {props['dbe']:.1f}")
+        st.caption("La formula per il DBE considera gli atomi tetravalenti (C, Si) + 1, sottrae la metà dei monovalenti (H, alogeni) e aggiunge la metà dei trivalenti (N, P). Gli atomi bivalenti (O, S) non influenzano il computo formale.")
+
         if st.session_state.stato_app == 'calcolo_1h':
             freq, solv, tech, nmr_type, plot_title, x_range = p['freq'], p['solvente'], '1h', '1h', f'Spettro 1H-NMR ({int(p["freq"])} MHz, {p["solvente"]}, {p["temp"]}°C)', [-0.5, 12.5]
             engine = SpinSystemEngine(props['mol_h'], freq, p.get('temp', 25))
@@ -501,7 +546,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                 st.markdown(f"<div class='debug-box'>{log_html}</div>", unsafe_allow_html=True)
 
         x_ppm = np.linspace(x_range[0], x_range[1], int(freq * 200))
-        
         gamma_base = 0.0025 * (500.0 / freq) if nmr_type == '1h' else 0.5
         y_intensity = np.zeros_like(x_ppm)
         segnali_visibili = []
@@ -546,7 +590,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             
         df_signals_clean = pd.DataFrame(df_data).sort_values(by='_sort_val', ascending=False)[['Shift (ppm)', 'Integrale' if nmr_type == '1h' else 'Tipo', 'Molteplicità', 'Atomi']]
 
-        # --- LOGICA PLOT COSY 2D ---
         if nmr_type == 'cosy':
             st.markdown("---")
             cross_peaks_idx = set()
@@ -590,7 +633,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             fig_cosy.update_yaxes(title_text="Chemical Shift δ (ppm)", autorange="reversed", scaleanchor="x2", scaleratio=1, showgrid=True, gridcolor='#E0E0E0', row=2, col=1)
             st.plotly_chart(fig_cosy, use_container_width=True)
             
-        # --- LOGICA PLOT 1D E TABELLA INTERATTIVA ---
         else:
             st.markdown("---")
             col_table, col_mol = st.columns([0.6, 0.4])
@@ -698,9 +740,22 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             fig_interattivo.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#E0E0E0', showticklabels=False)
             st.plotly_chart(fig_interattivo, use_container_width=True)
 
-            # --- EXPORT PDF COMPLETO SINCRO ---
             pdf_buffer = io.BytesIO()
             with PdfPages(pdf_buffer) as pdf:
+                fig_cover = plt.figure(figsize=(11.69, 8.27), dpi=300)
+                ax_cover = fig_cover.add_subplot(111)
+                ax_cover.axis('off')
+                cover_text = (
+                    f"Report Simulazione NMR\n\n"
+                    f"Nomenclatura IUPAC: {iupac}\n"
+                    f"Nome Comune: {comune}\n"
+                    f"Formula Bruta: {props['formula']}\n"
+                    f"Massa Molare: {props['mw']:.2f} g/mol\n"
+                    f"Grado di Insaturazione (DBE): {props['dbe']:.1f}\n"
+                )
+                ax_cover.text(0.1, 0.7, cover_text, fontsize=16, fontname='Palatino Linotype', verticalalignment='top')
+                salva_pagina_uniforme(pdf, fig_cover)
+
                 fig_mol_pdf = plt.figure(dpi=300)
                 ax_mol_pdf = fig_mol_pdf.add_subplot(111)
                 for atom in mol.GetAtoms(): atom.SetProp('atomNote', str(atom.GetIdx() + 1))
