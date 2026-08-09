@@ -243,7 +243,7 @@ class SpinSystemEngine:
             rep = nucs[0]
             integral = len(nucs)
             if rep.is_exchangeable:
-                signals.append(self._format_signal(rep, integral, nucs, 'br s', [], "Singoletto allargato. Protone soggetto a scambio chimico rapido; gli accoppiamenti vicinali sono soppressi."))
+                signals.append(self._format_signal(rep, integral, nucs, 'br s', [], "**Singoletto allargato**: Protone soggetto a scambio chimico rapido; gli accoppiamenti vicinali sono soppressi."))
                 continue
 
             j_vicini = []
@@ -253,13 +253,22 @@ class SpinSystemEngine:
 
             commento_ordine = ""
             if rep.chem_eq != rep.mag_eq:
-                commento_ordine = "\n- **Sistema Second-Order**: I nuclei appartengono alla stessa classe di equivalenza chimica ma differiscono per equivalenza magnetica (es. sistemi AA'BB'). Il multipletto reale sarà più complesso di quanto predetto dal prim'ordine."
+                commento_ordine = "<br><br>- <b>Sistema Second-Order</b>: I nuclei appartengono alla stessa classe di equivalenza chimica ma differiscono per equivalenza magnetica (es. sistemi AA'BB'). Il multipletto reale sarà più complesso."
             else:
                 for target_id, j_val in rep.couplings.items():
                     delta_nu = abs(rep.shift - self.nuclei[target_id].shift) * self.freq
                     if delta_nu > 0 and (delta_nu / j_val) < 10:
-                        commento_ordine = f"\n- **Accoppiamento Forte**: Rilevato basso rapporto $\Delta\\nu/J \approx {delta_nu/j_val:.1f}$. Il sistema devia dall'approssimazione del prim'ordine (effetti a tetto/distorsione di intensità)."
+                        commento_ordine = f"<br><br>- <b>Accoppiamento Forte</b>: Rilevato basso rapporto Δν/J ≈ {delta_nu/j_val:.1f}. Il sistema devia dall'approssimazione del prim'ordine (distorsione di intensità/effetto tetto)."
                         break
+
+            j_details = []
+            for j in j_vicini:
+                if j == 12.0: j_details.append(f"{j} Hz (Geminale, $^2J$)")
+                elif j == 7.5: j_details.append(f"{j} Hz (Vicinale/Orto, $^3J$)")
+                elif j == 2.0: j_details.append(f"{j} Hz (Meta/Long-range, $^4J$)")
+                else: j_details.append(f"{j} Hz")
+            
+            j_str = f"<br><br><b>Costanti J rilevate:</b> {', '.join(j_details)}" if j_details else ""
 
             if not j_vicini: mult = 's'
             elif len(j_vicini) == 1: mult = 'd'
@@ -270,7 +279,7 @@ class SpinSystemEngine:
                 mult = 'm' if 'm' in chars or sum(counts.values()) > 6 else "".join(chars)
 
             base_comment = self._descrivi_mult(mult)
-            signals.append(self._format_signal(rep, integral, nucs, mult, j_vicini, base_comment + commento_ordine))
+            signals.append(self._format_signal(rep, integral, nucs, mult, j_vicini, base_comment + commento_ordine + j_str))
             
         return signals
 
@@ -281,9 +290,14 @@ class SpinSystemEngine:
                'q': "**Quartetto**: Accoppiamento con tre nuclei equivalenti.", 
                'm': "**Multipletto**: Sovrapposizione complessa di stati di spin."}
         if mult in diz: return diz[mult]
+        
         nomi = {'d': "Doppietto", 't': "Tripletto", 'q': "Quartetto"}
-        if len(mult) == 2 and all(c in nomi for c in mult): return f"**{nomi[mult[0]]} di {nomi[mult[1]].lower()}i**: Risoluzione dello splitting tree con costanti J distinte."
-        elif len(mult) == 3 and all(c in nomi for c in mult): return f"**{nomi[mult[0]]} di {nomi[mult[1]].lower()}i di {nomi[mult[2]].lower()}i**: Splitting tree triplo."
+        plur = {'d': "doppietti", 't': "tripletti", 'q': "quartetti"}
+        
+        if len(mult) == 2 and all(c in nomi for c in mult): 
+            return f"**{nomi[mult[0]]} di {plur[mult[1]]}**: Risoluzione dello splitting tree con costanti J distinte."
+        elif len(mult) == 3 and all(c in nomi for c in mult): 
+            return f"**{nomi[mult[0]]} di {plur[mult[1]]} di {plur[mult[2]]}**: Splitting tree triplo."
         return "**Multipletto complesso**: Generato dalla cascata di accoppiamenti di prim'ordine multipli."
 
     def _format_signal(self, rep, integral, nucs, mult, j_vals, comment):
@@ -423,8 +437,7 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
         c2.metric("Massa Molare", f"{props['mw']:.2f} g/mol")
         c3.metric("DBE (Insaturazioni)", f"{props['dbe']:.1f}")
         
-        # Dettaglio DBE esplicito ripristinato
-        st.caption("La formula per il DBE considera gli atomi tetravalenti (C, Si) + 1, sottrae la metà dei monovalenti (H, alogeni) e aggiunge la metà dei trivalenti (N, P). Gli atomi bivalenti (O, S) non influenzano il computo formale. Modifiche manuali sono necessarie per interpretare stati di ossidazione superiori (es. solfossidi, fosfati) in base all'ipervalenza.")
+        st.caption("La formula per il DBE considera gli atomi tetravalenti (C, Si) + 1, sottrae la metà dei monovalenti (H, alogeni) e aggiunge la metà dei trivalenti (N, P). Gli atomi bivalenti (O, S) non influenzano il computo formale.")
 
         p = st.session_state.parametri
         if st.session_state.stato_app == 'calcolo_1h':
@@ -449,9 +462,36 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                 st.write(f"- **Classi di Equivalenza**: {num_chem} gruppi isocroni chimicamente; {num_mag} gruppi magneticamente equivalenti.")
                 st.write(f"- **Sistemi di Spin**: Individuate {len(engine.spin_systems_graphs)} reti di spin mutuamente accoppiate e indipendenti.")
 
+        # Pre-calcolo delle coordinate spettro 1D
+        x_ppm = np.linspace(x_range[0], x_range[1], int(freq * 200))
+        gamma_base = 0.0025 * (500.0 / freq) if nmr_type == '1h' else 0.5
+        y_intensity = np.zeros_like(x_ppm)
+        segnali_visibili = []
+
+        for sig in signals:
+            if nmr_type == '1h':
+                scambiato = (solv in ["D2O", "CD3OD"] and sig.get('is_exchangeable', False))
+                if scambiato: continue 
+                segnali_visibili.append(sig)
+                gamma_app = 0.06 if sig.get('is_exchangeable', False) else gamma_base
+                for p_shift, p_int in sig['sub_peaks']: y_intensity += p_int / (1.0 + ((x_ppm - p_shift) / gamma_app)**2)
+            elif nmr_type == '13c':
+                n_h = sig.get('n_h', 0)
+                if tech == "DEPT-135": p_int = -1.0 if n_h == 2 else (0.0 if n_h == 0 else 1.0)
+                elif tech == "DEPT-90": p_int = 1.0 if n_h == 1 else 0.0
+                elif tech == "APT": p_int = 1.0 if n_h in [0, 2] else -1.0
+                else: p_int = 1.0
+                
+                if p_int != 0.0:
+                    segnali_visibili.append(sig)
+                    y_intensity += p_int / (1.0 + ((x_ppm - float(sig.get('delta', 1.0))) / gamma_base)**2)
+
+        y_min = min(y_intensity) * 1.15 if min(y_intensity) < 0 else 0
+        y_max = max(y_intensity) * 1.15 if np.any(y_intensity) else 1
+
         # --- PREPARAZIONE DATI PER TABELLA PULITA ---
         df_data = []
-        original_comments = {} # Mapping shift -> commento lungo
+        original_comments = {} 
         
         for sig in signals:
             scambiato = (nmr_type == '1h' and solv in ["D2O", "CD3OD"] and sig.get('is_exchangeable', False))
@@ -479,7 +519,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             df_data.append(row)
             
         df_signals_display = pd.DataFrame(df_data).sort_values(by='_sort_val', ascending=False)
-        # Ordina le colonne: Shift, (Tipo o Integrale), Molteplicità, Atomi
         cols_order = ['Shift (ppm)', 'Integrale' if nmr_type == '1h' else 'Tipo', 'Molteplicità', 'Atomi']
         df_signals_clean = df_signals_display[cols_order]
 
@@ -505,13 +544,10 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             
             gamma_2d = 0.015 * (500.0 / freq)
             gamma_1d = 0.0025 * (500.0 / freq)
-            x_ppm_1d = np.linspace(x_range[0], x_range[1], int(freq * 200))
-            y_intensity_1d = np.zeros_like(x_ppm_1d)
 
             for sig in signals:
                 if not sig.get('is_exchangeable', False):
                     for p_shift, p_int in sig['sub_peaks']:
-                        y_intensity_1d += p_int / (1.0 + ((x_ppm_1d - p_shift) / gamma_1d)**2)
                         Z += p_int / (1.0 + ((X - p_shift)/gamma_2d)**2 + ((Y - p_shift)/gamma_2d)**2)
                         
             for i, j in cross_peaks_idx:
@@ -522,7 +558,7 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                         Z += (px_int * py_int * 0.3) / (1.0 + ((X - py)/gamma_2d)**2 + ((Y - px)/gamma_2d)**2)
 
             fig_cosy = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.2, 0.8], vertical_spacing=0.01)
-            fig_cosy.add_trace(go.Scatter(x=x_ppm_1d, y=y_intensity_1d, mode='lines', line=dict(color=BORDEAUX, width=1.5), hoverinfo='skip', showlegend=False), row=1, col=1)
+            fig_cosy.add_trace(go.Scatter(x=x_ppm, y=y_intensity, mode='lines', line=dict(color=BORDEAUX, width=1.5), hoverinfo='skip', showlegend=False), row=1, col=1)
             fig_cosy.add_trace(go.Contour(
                 z=Z, x=x_grid, y=x_grid, colorscale=[[0, 'white'], [1, BORDEAUX]], showscale=False,
                 contours=dict(start=0.1, size=(np.max(Z) - 0.1) / 8 if np.max(Z) > 0.1 else 1, coloring='lines'),
@@ -540,49 +576,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             
         # --- LOGICA PLOT 1D E TABELLA INTERATTIVA ---
         else:
-            pdf_buffer = io.BytesIO()
-            with PdfPages(pdf_buffer) as pdf:
-
-                fig_mol_draw = plt.figure(dpi=300)
-                ax_mol_draw = fig_mol_draw.add_subplot(111)
-                for atom in mol.GetAtoms(): atom.SetProp('atomNote', str(atom.GetIdx() + 1))
-                d2d = rdMolDraw2D.MolDraw2DCairo(1500, 1000)
-                d2d.drawOptions().annotationFontScale = 0.9
-                d2d.DrawMolecule(mol)
-                d2d.FinishDrawing()
-                ax_mol_draw.imshow(Image.open(io.BytesIO(d2d.GetDrawingText())))
-                ax_mol_draw.axis('off')
-                
-                fig_mol_draw.set_size_inches(11.69, 8.27) 
-                pdf.savefig(fig_mol_draw, orientation='landscape', bbox_inches='tight')
-                plt.close(fig_mol_draw)
-
-                x_ppm = np.linspace(x_range[0], x_range[1], int(freq * 200))
-                gamma_base = 0.0025 * (500.0 / freq) if nmr_type == '1h' else 0.5
-                y_intensity = np.zeros_like(x_ppm)
-                segnali_visibili = []
-
-                for sig in signals:
-                    if nmr_type == '1h':
-                        scambiato = (solv in ["D2O", "CD3OD"] and sig.get('is_exchangeable', False))
-                        if scambiato: continue 
-                        segnali_visibili.append(sig)
-                        gamma_app = 0.06 if sig.get('is_exchangeable', False) else gamma_base
-                        for p_shift, p_int in sig['sub_peaks']: y_intensity += p_int / (1.0 + ((x_ppm - p_shift) / gamma_app)**2)
-                    elif nmr_type == '13c':
-                        n_h = sig.get('n_h', 0)
-                        if tech == "DEPT-135": p_int = -1.0 if n_h == 2 else (0.0 if n_h == 0 else 1.0)
-                        elif tech == "DEPT-90": p_int = 1.0 if n_h == 1 else 0.0
-                        elif tech == "APT": p_int = 1.0 if n_h in [0, 2] else -1.0
-                        else: p_int = 1.0
-                        
-                        if p_int != 0.0:
-                            segnali_visibili.append(sig)
-                            y_intensity += p_int / (1.0 + ((x_ppm - float(sig.get('delta', 1.0))) / gamma_base)**2)
-
-                y_min = min(y_intensity) * 1.15 if min(y_intensity) < 0 else 0
-                y_max = max(y_intensity) * 1.15 if np.any(y_intensity) else 1
-
             st.markdown("---")
             col_table, col_mol = st.columns([0.6, 0.4])
             
@@ -592,6 +585,7 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             
             selected_atoms, selected_delta, selected_mult = [], None, ""
             long_comment = ""
+            width_box = 0
             
             if len(event.selection.rows) > 0:
                 idx = event.selection.rows[0]
@@ -636,19 +630,23 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             if selected_delta is not None:
                 st.markdown("---")
                 st.markdown(f"### Dettaglio del Segnale a {selected_delta:.2f} ppm")
-                c_testo, c_zoom = st.columns([0.6, 0.4])
+                c_testo, c_zoom = st.columns([0.65, 0.35])
                 with c_testo:
-                    st.info(long_comment)
+                    st.markdown(f"""
+                    <div style="background-color: #f5f5f5; border: 1px solid #d3d3d3; border-left: 5px solid #6c757d; padding: 15px; border-radius: 4px; color: #333333; font-size: 15px; height: 100%;">
+                        {long_comment}
+                    </div>
+                    """, unsafe_allow_html=True)
                 with c_zoom:
-                    fig_singolo_zoom = plt.figure(figsize=(4, 2), dpi=150)
+                    fig_singolo_zoom = plt.figure(figsize=(3, 1.5), dpi=100)
                     ax_zoom = fig_singolo_zoom.add_subplot(111)
                     ax_zoom.plot(x_ppm, y_intensity, color=BORDEAUX, linewidth=2.0)
                     molt_f = len(selected_mult) if len(selected_mult) > 0 else 1
-                    width_zoom = ((0.03 * molt_f) * (500.0 / freq)) * 1.5 # Leggermente più largo per il focus visivo
+                    width_box = (0.05 * molt_f) * (500.0 / freq)
+                    width_zoom = width_box * 1.5 
                     ax_zoom.set_xlim(selected_delta + width_zoom, selected_delta - width_zoom)
                     mask = (x_ppm >= selected_delta - width_zoom) & (x_ppm <= selected_delta + width_zoom)
                     ax_zoom.set_ylim(0, (np.max(y_intensity[mask]) if np.any(mask) else 1) * 1.1)
-                    ax_zoom.set_title(f"Espansione ({selected_mult})", fontsize=10, fontname='Palatino Linotype')
                     ax_zoom.get_yaxis().set_visible(False)
                     for spine in ['top', 'right', 'left']: ax_zoom.spines[spine].set_visible(False)
                     st.pyplot(fig_singolo_zoom)
@@ -660,8 +658,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             if nmr_type == '13c' and tech in ["DEPT-135", "APT"]: fig_interattivo.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.3)
             
             if selected_delta is not None and nmr_type == '1h':
-                molt_factor = len(selected_mult) if len(selected_mult) > 0 else 1
-                width_box = (0.05 * molt_factor) * (500.0 / freq)
                 fig_interattivo.add_vrect(
                     x0=selected_delta + width_box, x1=selected_delta - width_box,
                     fillcolor=BORDEAUX, opacity=0.18, layer="above", line_width=1.5, line_color=BORDEAUX,
@@ -673,35 +669,71 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
             fig_interattivo.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#E0E0E0', showticklabels=False)
             st.plotly_chart(fig_interattivo, use_container_width=True)
 
-            # Generazione PDF (Aggiunta dei multipletti in coda)
-            fig_main = plt.figure(dpi=300)
-            ax_spec = fig_main.add_subplot(111)
-            ax_spec.plot(x_ppm, y_intensity, color=BORDEAUX, linewidth=1.5)
-            if nmr_type == '13c' and tech in ["DEPT-135", "APT"]: ax_spec.axhline(0, color='black', linestyle='--', alpha=0.3)
-            ax_spec.set_xlim(x_range[1], x_range[0])
-            ax_spec.set_ylim(y_min, y_max)
-            ax_spec.set_xlabel('Chemical Shift δ (ppm)', fontsize=12)
-            ax_spec.set_ylabel('Intensità', fontsize=12)
-            ax_spec.set_title(plot_title, fontsize=14, fontweight='bold')
-            for sp in ['top', 'right']: ax_spec.spines[sp].set_visible(False)
-            salva_pagina_uniforme(pdf, fig_main)
+            # --- GENERAZIONE PDF DINAMICO A FINE SCRIPT ---
+            pdf_buffer = io.BytesIO()
+            with PdfPages(pdf_buffer) as pdf:
+                
+                # Pagina 1: Struttura Base/Evidenziata
+                fig_mol_pdf = plt.figure(dpi=300)
+                ax_mol_pdf = fig_mol_pdf.add_subplot(111)
+                for atom in mol.GetAtoms(): atom.SetProp('atomNote', str(atom.GetIdx() + 1))
+                d2d_pdf = rdMolDraw2D.MolDraw2DCairo(1500, 1000)
+                opts_pdf = d2d_pdf.drawOptions()
+                opts_pdf.annotationFontScale = 0.9
+                if selected_delta is not None:
+                    opts_pdf.setHighlightColour(bordeaux_rgba)
+                    d2d_pdf.DrawMolecule(mol, highlightAtoms=selected_atoms, highlightAtomColors=highlight_dict, highlightBonds=selected_bonds, highlightBondColors=highlight_bonds_dict)
+                else:
+                    d2d_pdf.DrawMolecule(mol)
+                d2d_pdf.FinishDrawing()
+                ax_mol_pdf.imshow(Image.open(io.BytesIO(d2d_pdf.GetDrawingText())))
+                ax_mol_pdf.axis('off')
+                salva_pagina_uniforme(pdf, fig_mol_pdf)
+                
+                # Pagina 2: Tabella Assegnazioni
+                fig_tab_pdf = plt.figure(dpi=300)
+                ax_tab_pdf = fig_tab_pdf.add_subplot(111)
+                ax_tab_pdf.axis('off')
+                tab_data = df_signals_clean.astype(str).values.tolist()
+                tab_cols = df_signals_clean.columns.tolist()
+                tab = ax_tab_pdf.table(cellText=tab_data, colLabels=tab_cols, loc='center', cellLoc='center')
+                tab.auto_set_font_size(False)
+                tab.set_fontsize(10)
+                tab.scale(1, 1.5)
+                salva_pagina_uniforme(pdf, fig_tab_pdf)
 
-            if nmr_type == '1h' and len(segnali_visibili) > 0:
-                fig_zoom_pdf, axes = plt.subplots(1, len(segnali_visibili), dpi=300, figsize=(max(3 * len(segnali_visibili), 6), 3.5))
-                if len(segnali_visibili) == 1: axes = [axes]
-                signals_sorted = sorted(segnali_visibili, key=lambda x: float(x.get('delta', 0)), reverse=True)
-                for i, (ax, sig) in enumerate(zip(axes, signals_sorted)):
-                    delta = float(sig.get('delta', 1.0))
-                    ax.plot(x_ppm, y_intensity, color=BORDEAUX, linewidth=2.0) 
-                    molt_f = len(sig.get('multiplicity', 's'))
-                    width_zoom = 0.20 if sig.get('is_exchangeable', False) else ((0.03 * molt_f) * (500.0 / freq))
-                    ax.set_xlim(delta + width_zoom, delta - width_zoom)
-                    mask = (x_ppm >= delta - width_zoom) & (x_ppm <= delta + width_zoom)
-                    ax.set_ylim(0, (np.max(y_intensity[mask]) if np.any(mask) else 1) * 1.1)
-                    ax.set_title(f"{delta:.2f} ppm\n{sig.get('multiplicity', 's')}", fontsize=10)
-                    ax.get_yaxis().set_visible(False)
-                    for spine in ['top', 'right', 'left']: ax.spines[spine].set_visible(False)
-                salva_pagina_uniforme(pdf, fig_zoom_pdf)
+                # Pagina 3: Spettro Globale (Evidenziato se selezionato)
+                fig_spec_pdf = plt.figure(dpi=300)
+                ax_spec_pdf = fig_spec_pdf.add_subplot(111)
+                ax_spec_pdf.plot(x_ppm, y_intensity, color=BORDEAUX, linewidth=1.5)
+                if selected_delta is not None and nmr_type == '1h':
+                    ax_spec_pdf.axvspan(selected_delta - width_box, selected_delta + width_box, color=BORDEAUX, alpha=0.18)
+                if nmr_type == '13c' and tech in ["DEPT-135", "APT"]: ax_spec_pdf.axhline(0, color='black', linestyle='--', alpha=0.3)
+                ax_spec_pdf.set_xlim(x_range[1], x_range[0])
+                ax_spec_pdf.set_ylim(y_min, y_max)
+                ax_spec_pdf.set_xlabel('Chemical Shift δ (ppm)', fontsize=12)
+                ax_spec_pdf.set_ylabel('Intensità', fontsize=12)
+                ax_spec_pdf.set_title(plot_title, fontsize=14, fontweight='bold')
+                for sp in ['top', 'right']: ax_spec_pdf.spines[sp].set_visible(False)
+                salva_pagina_uniforme(pdf, fig_spec_pdf)
+
+                # Pagina 4: Zoom di tutti i multipletti
+                if nmr_type == '1h' and len(segnali_visibili) > 0:
+                    fig_zoom_pdf, axes = plt.subplots(1, len(segnali_visibili), dpi=300, figsize=(max(3 * len(segnali_visibili), 6), 3.5))
+                    if len(segnali_visibili) == 1: axes = [axes]
+                    signals_sorted = sorted(segnali_visibili, key=lambda x: float(x.get('delta', 0)), reverse=True)
+                    for i, (ax, sig) in enumerate(zip(axes, signals_sorted)):
+                        delta = float(sig.get('delta', 1.0))
+                        ax.plot(x_ppm, y_intensity, color=BORDEAUX, linewidth=2.0) 
+                        molt_f = len(sig.get('multiplicity', 's'))
+                        w_zoom = 0.20 if sig.get('is_exchangeable', False) else ((0.03 * molt_f) * (500.0 / freq))
+                        ax.set_xlim(delta + w_zoom, delta - w_zoom)
+                        mask = (x_ppm >= delta - w_zoom) & (x_ppm <= delta + w_zoom)
+                        ax.set_ylim(0, (np.max(y_intensity[mask]) if np.any(mask) else 1) * 1.1)
+                        ax.set_title(f"{delta:.2f} ppm\n{sig.get('multiplicity', 's')}", fontsize=10)
+                        ax.get_yaxis().set_visible(False)
+                        for spine in ['top', 'right', 'left']: ax.spines[spine].set_visible(False)
+                    salva_pagina_uniforme(pdf, fig_zoom_pdf)
 
             st.markdown("---")
             st.download_button("Esporta Report Completo (PDF)", data=pdf_buffer.getvalue(), file_name="Report_NMR_Lab.pdf", mime="application/pdf", use_container_width=True)
