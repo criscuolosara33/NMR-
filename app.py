@@ -125,46 +125,33 @@ class SpinSystemEngine:
 
     def _stima_shift_base(self, atom):
         c_atom = atom.GetNeighbors()[0]
-        
-        # Scambiabili
         if c_atom.GetAtomicNum() in [7, 8, 16]:
             if c_atom.GetAtomicNum() == 8:
                 if any(b.GetBondType() == Chem.BondType.DOUBLE for b in c_atom.GetBonds()): return 11.0
                 return 4.0 
             elif c_atom.GetAtomicNum() == 7: return 2.5
             elif c_atom.GetAtomicNum() == 16: return 1.5
-
         if c_atom.GetAtomicNum() != 6: return 2.0
-
-        # SP2 / Aromatici / SP
         if c_atom.GetIsAromatic(): return 7.3
         elif c_atom.GetHybridization() == Chem.HybridizationType.SP2:
             if any(b.GetBondType() == Chem.BondType.DOUBLE and b.GetOtherAtom(c_atom).GetAtomicNum() == 8 for b in c_atom.GetBonds()):
                 return 9.8
             return 5.3
         elif c_atom.GetHybridization() == Chem.HybridizationType.SP: return 2.5
-
-        # Shoolery/Curphy-Morrison additivity per Alifatici (SP3)
         num_H = sum(1 for n in c_atom.GetNeighbors() if n.GetAtomicNum() == 1)
         if num_H == 3: shift = 0.9
         elif num_H == 2: shift = 1.2
         elif num_H == 1: shift = 1.5
         else: shift = 1.5
-
         for neighbor in c_atom.GetNeighbors():
             if neighbor.GetAtomicNum() == 1: continue
             atomic_num = neighbor.GetAtomicNum()
-            
-            # Alpha
             if atomic_num == 6:
                 if neighbor.GetIsAromatic(): shift += 1.5
                 elif neighbor.GetHybridization() == Chem.HybridizationType.SP2:
-                    if any(b.GetOtherAtom(neighbor).GetAtomicNum() == 8 for b in neighbor.GetBonds() if b.GetBondType() == Chem.BondType.DOUBLE):
-                        shift += 1.0 # Alpha carbonile
-                    else: shift += 0.8 # Alpha alchene
+                    if any(b.GetOtherAtom(neighbor).GetAtomicNum() == 8 for b in neighbor.GetBonds() if b.GetBondType() == Chem.BondType.DOUBLE): shift += 1.0
+                    else: shift += 0.8
                 elif neighbor.GetHybridization() == Chem.HybridizationType.SP: shift += 0.9
-                
-                # Beta
                 for beta in neighbor.GetNeighbors():
                     if beta.GetIdx() == c_atom.GetIdx() or beta.GetAtomicNum() == 1: continue
                     b_atomic_num = beta.GetAtomicNum()
@@ -172,23 +159,20 @@ class SpinSystemEngine:
                     elif b_atomic_num in [9, 17, 35, 53]: shift += 0.3
                     elif b_atomic_num == 6 and beta.GetHybridization() == Chem.HybridizationType.SP2:
                         if any(b.GetOtherAtom(beta).GetAtomicNum() == 8 for b in beta.GetBonds() if b.GetBondType() == Chem.BondType.DOUBLE): shift += 0.2
-            
             elif atomic_num == 8:
                 if any(b.GetBondType() == Chem.BondType.DOUBLE for b in neighbor.GetBonds()): shift += 3.0
                 else: shift += 2.5
             elif atomic_num == 7: shift += 1.5
             elif atomic_num == 9: shift += 3.0
             elif atomic_num == 17: shift += 2.2
-            elif atomic_num == 35: shift += 2.1 # Bromo
+            elif atomic_num == 35: shift += 2.1
             elif atomic_num == 53: shift += 1.7
             elif atomic_num == 16: shift += 1.2
-            
         return shift
 
     def _build_engine(self):
         ranks = list(Chem.CanonicalRankAtoms(self.mol, breakTies=False))
         shifts_visti = []
-        
         amide_matches = self.mol.GetSubstructMatches(Chem.MolFromSmarts("[CX3](=O)[NX3](C)(C)"))
         amide_methyl_carbons = []
         if amide_matches:
@@ -214,7 +198,6 @@ class SpinSystemEngine:
 
                 while any(abs(shift - sv) < 0.05 for sv in shifts_visti): shift += 0.1
                 if not any(abs(shift - sv) < 0.05 for sv in shifts_visti): shifts_visti.append(shift)
-                
                 r = ranks[idx]
                 if c_idx in amide_methyl_carbons and k_exchange > 1000: r = "dynamic_avg"
                 self.nuclei[idx] = Nucleus(idx, '1H', shift, r, is_exch, c_idx + 1)
@@ -263,7 +246,7 @@ class SpinSystemEngine:
             rep = nucs[0]
             integral = len(nucs)
             if rep.is_exchangeable:
-                signals.append(self._format_signal(rep, integral, nucs, 'br s', [], [], "**Singoletto allargato**: Protone soggetto a scambio chimico. Accoppiamenti collassati."))
+                signals.append(self._format_signal(rep, integral, nucs, 'br s', [], [], "**Singoletto allargato**: Protone soggetto a scambio chimico. Accoppiamenti collassati.", None))
                 continue
 
             j_vicini = []
@@ -366,13 +349,11 @@ class SpinSystemEngine:
             j = flat_j_vals[i] if i < len(flat_j_vals) else 7.5
             nuovi_picchi = []
             off, rat = ottieni_offset(c, j)
-            
             if roofing_params and c == 'd' and i == 0:
                 rat = [roofing_params['inner']/2, roofing_params['outer']/2] if roofing_params['is_higher_freq'] else [roofing_params['outer']/2, roofing_params['inner']/2]
                 j_ppm = j / freq
                 c_ppm = roofing_params['C'] / freq
                 off = [-(c_ppm - j_ppm)/2, (c_ppm + j_ppm)/2] if roofing_params['is_higher_freq'] else [-(c_ppm + j_ppm)/2, (c_ppm - j_ppm)/2]
-
             for p_shift, p_int in picchi:
                 for o, r in zip(off, rat): nuovi_picchi.append((p_shift + o, p_int * r))
             picchi = nuovi_picchi
@@ -541,14 +522,15 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                 st.markdown(f"<div class='debug-box'>{log_html}</div>", unsafe_allow_html=True)
 
         x_ppm = np.linspace(x_range[0], x_range[1], int(freq * 200))
-        
         gamma_base = (p.get('lb', 0.5) / freq) if nmr_type == '1h' else 0.5
         y_intensity = np.zeros_like(x_ppm)
-        
+        segnali_visibili = []
+
         for sig in signals:
             if nmr_type == '1h':
                 scambiato = (solv in ["D2O", "CD3OD"] and sig.get('is_exchangeable', False))
                 if scambiato: continue 
+                segnali_visibili.append(sig)
                 gamma_app = max(0.06, gamma_base) if sig.get('is_exchangeable', False) else gamma_base
                 for p_shift, p_int in sig['sub_peaks']: y_intensity += p_int / (1.0 + ((x_ppm - p_shift) / gamma_app)**2)
             elif nmr_type == '13c':
@@ -557,7 +539,9 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                 if tech == "DEPT-135": p_int = -1.0 if n_h == 2 else (0.0 if n_h == 0 else 1.0)
                 elif tech == "DEPT-90": p_int = 1.0 if n_h == 1 else 0.0
                 elif tech == "APT": p_int = 1.0 if n_h in [0, 2] else -1.0
-                if p_int != 0.0: y_intensity += p_int / (1.0 + ((x_ppm - float(sig.get('delta', 1.0))) / gamma_base)**2)
+                if p_int != 0.0: 
+                    segnali_visibili.append(sig)
+                    y_intensity += p_int / (1.0 + ((x_ppm - float(sig.get('delta', 1.0))) / gamma_base)**2)
 
         if nmr_type == '1h':
             noise_amplitude = (0.05 / np.sqrt(p.get('ns', 1))) * np.max(y_intensity) if np.max(y_intensity) > 0 else 0.01
