@@ -13,7 +13,15 @@ from rdkit.Chem.Draw import rdMolDraw2D
 from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 import warnings
+import warnings
+import matplotlib.pyplot as plt
 
+# Sopprime completamente i warning di font di Matplotlib
+warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib.font_manager")
+
+# Forza un fallback pulito sui font serif standard disponibili su Linux (Streamlit Cloud)
+plt.rcParams['font.family'] = 'serif'
+plt.rcParams['font.serif'] = ['DejaVu Serif', 'Bitstream Vera Serif', 'Times New Roman', 'serif']
 st.set_page_config(page_title="NMR Laboratory", layout="wide")
 
 # --- CSS E COSTANTI ESTETICHE ---
