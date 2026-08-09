@@ -423,28 +423,6 @@ def salva_pagina_uniforme(pdf, fig):
 # --- UI MAIN ---
 st.title("NMR Laboratory (Interactive Platform)")
 
-with st.expander("📖 Tutorial e Legenda delle Funzionalità - Come usare la piattaforma"):
-    st.markdown("""
-    **1. Editor Strutturale (Ketcher)**
-    * Disegna la molecola. L'algoritmo terrà conto della stereochimica (cunei, doppi legami E/Z) per individuare protoni diastereotopici.
-    
-    **2. Parametri Strumentali e Processing**
-    * **Frequenza (MHz)**: Modifica *realmente* l'Hamiltoniana del sistema. Variando $B_0$, cambierà il rapporto $\Delta\nu / J$ (in Hz). Nei sistemi di secondo ordine (es. AB), vedrai i picchi "avvicinarsi" in intensità ad alti campi (l'effetto tetto svanisce).
-    * **Line Broadening (LB)**: Modifica la larghezza di riga (simula apodizzazione esponenziale sul FID).
-    * **Number of Scans (NS)**: Aumentando NS, il rumore gaussiano termico diminuisce proporzionalmente a $1/\sqrt{NS}$.
-    * **Temperatura**: Attiva il modello di *Dynamic Exchange* (Equazione di Eyring). Disegnando ammidi (es. DMF), variando la temperatura vedrai i due singoletti dei metili unificarsi in un unico picco mediato per *fast exchange*.
-    
-    **3. Tabella e Spiegazioni Quantomeccaniche**
-    * La tabella elenca tutti i segnali previsti. **Clicca su una riga qualsiasi** per attivare il motore diagnostico:
-        * La molecola illuminerà in bordeaux opaco i nuclei responsabili del segnale e i legami.
-        * Sullo spettro apparirà un riquadro che evidenzierà l'area del multipletto.
-        * Apparirà un **box descrittivo** grigio con i dettagli topologici, di accoppiamento e i valori delle costanti $J$.
-        * Per i multipletti complessi, il sistema disegnerà lo **Splitting Tree** (Albero vettoriale) per confermare la genesi della molteplicità.
-    
-    **4. Esportazione Dati**
-    * In fondo alla pagina trovi il pulsante per scaricare il **Report PDF**. Il report cattura l'esatto stato interattivo (molecola evidenziata, tabella, spettro e zoom dei multipletti).
-    """)
-
 smiles = st_ketcher()
 
 if smiles != st.session_state.ultimo_smiles:
@@ -458,10 +436,11 @@ if st.session_state.stato_app == "input":
     solv_1h = c2.selectbox("Solvente", ["CDCl3", "DMSO-d6", "D2O", "CD3OD"])
     temp_1h = c3.slider("Temperatura (°C)", -100, 150, 25)
     
-    st.markdown("### Processing del Segnale (FID)")
-    cp1, cp2 = st.columns(2)
-    lb_1h = cp1.slider("Line Broadening (Hz)", 0.0, 10.0, 0.5, 0.5)
-    scans_1h = cp2.selectbox("Number of Scans (NS)", [1, 4, 16, 64, 256], index=1)
+    st.markdown("### Modalità 13C-NMR")
+    c4, c5, c6 = st.columns(3)
+    freq_13c = c4.selectbox("Frequenza 13C (MHz)", [75.0, 100.0, 125.0, 150.0, 200.0, 250.0], index=2)
+    solv_13c = c5.selectbox("Solvente 13C", ["CDCl3", "DMSO-d6", "D2O", "CD3OD"])
+    modo_13c = c6.selectbox("Esperimento a Impulsi", ["Broadband", "DEPT-135", "DEPT-90", "APT"])
     
     st.markdown("<br>", unsafe_allow_html=True)
     cb1, cb2, cb3 = st.columns(3)
@@ -469,21 +448,21 @@ if st.session_state.stato_app == "input":
     if cb1.button("Acquisisci Spettro 1H", use_container_width=True):
         if not smiles: st.error("Disegna una molecola.")
         else:
-            st.session_state.parametri = {'freq': freq_1h, 'solvente': solv_1h, 'tech': '1h', 'temp': temp_1h, 'lb': lb_1h, 'ns': scans_1h}
+            st.session_state.parametri = {'freq': freq_1h, 'solvente': solv_1h, 'tech': '1h', 'temp': temp_1h}
             st.session_state.stato_app = "calcolo_1h"
             st.rerun()
             
     if cb2.button("Acquisisci Spettro 13C", use_container_width=True):
         if not smiles: st.error("Disegna una molecola.")
         else:
-            st.session_state.parametri = {'freq': freq_1h/4, 'solvente': solv_1h, 'tech': 'Broadband'} 
+            st.session_state.parametri = {'freq': freq_13c, 'solvente': solv_13c, 'tech': modo_13c}
             st.session_state.stato_app = "calcolo_13c"
             st.rerun()
             
     if cb3.button("Mappa COSY 2D", use_container_width=True):
         if not smiles: st.error("Disegna una molecola.")
         else:
-            st.session_state.parametri = {'freq': freq_1h, 'solvente': solv_1h, 'tech': 'cosy', 'temp': temp_1h, 'lb': lb_1h, 'ns': scans_1h}
+            st.session_state.parametri = {'freq': freq_1h, 'solvente': solv_1h, 'tech': 'cosy', 'temp': temp_1h}
             st.session_state.stato_app = "calcolo_cosy"
             st.rerun()
 
@@ -500,14 +479,14 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
         
         if st.session_state.stato_app == 'calcolo_1h':
             freq, solv, tech, nmr_type, plot_title, x_range = p['freq'], p['solvente'], '1h', '1h', f'Spettro 1H-NMR ({int(p["freq"])} MHz, {p["solvente"]}, {p["temp"]}°C)', [-0.5, 12.5]
-            engine = SpinSystemEngine(props['mol_h'], freq, p['temp'])
+            engine = SpinSystemEngine(props['mol_h'], freq, p.get('temp', 25))
             signals = engine.get_signals_for_ui()
         elif st.session_state.stato_app == 'calcolo_13c':
             freq, solv, tech, nmr_type, plot_title, x_range = p['freq'], p['solvente'], p['tech'], '13c', f'Spettro 13C-NMR ({int(p["freq"])} MHz, {p["solvente"]})', [-10, 220]
             signals = stima_locale_13c(props['mol_no_h'])
         else:
             freq, solv, tech, nmr_type, plot_title, x_range = p['freq'], p['solvente'], 'cosy', 'cosy', f'COSY 2D ({int(p["freq"])} MHz, {p["solvente"]})', [-0.5, 12.5]
-            engine = SpinSystemEngine(props['mol_h'], freq, p['temp'])
+            engine = SpinSystemEngine(props['mol_h'], freq, p.get('temp', 25))
             signals = engine.get_signals_for_ui()
 
         with st.expander("🔬 NMR DEBUG & Analisi Dinamica (Espandi)"):
@@ -522,7 +501,8 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                 st.markdown(f"<div class='debug-box'>{log_html}</div>", unsafe_allow_html=True)
 
         x_ppm = np.linspace(x_range[0], x_range[1], int(freq * 200))
-        gamma_base = (p.get('lb', 0.5) / freq) if nmr_type == '1h' else 0.5
+        
+        gamma_base = 0.0025 * (500.0 / freq) if nmr_type == '1h' else 0.5
         y_intensity = np.zeros_like(x_ppm)
         segnali_visibili = []
 
@@ -542,10 +522,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                 if p_int != 0.0: 
                     segnali_visibili.append(sig)
                     y_intensity += p_int / (1.0 + ((x_ppm - float(sig.get('delta', 1.0))) / gamma_base)**2)
-
-        if nmr_type == '1h':
-            noise_amplitude = (0.05 / np.sqrt(p.get('ns', 1))) * np.max(y_intensity) if np.max(y_intensity) > 0 else 0.01
-            y_intensity += np.random.normal(0, noise_amplitude, len(x_ppm))
 
         y_min = min(y_intensity) * 1.15 if min(y_intensity) < 0 else 0
         y_max = max(y_intensity) * 1.15 if np.any(y_intensity) else 1
