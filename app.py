@@ -13,8 +13,6 @@ from rdkit.Chem.Draw import rdMolDraw2D
 from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 import warnings
-import warnings
-import matplotlib.pyplot as plt
 
 # Sopprime completamente i warning di font di Matplotlib
 warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib.font_manager")
@@ -52,10 +50,6 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib.font_manager")
-plt.rcParams['font.family'] = 'serif'
-plt.rcParams['font.serif'] = ['DejaVu Serif', 'Bitstream Vera Serif', 'Times New Roman', 'serif']
-
 if 'ultimo_smiles' not in st.session_state: st.session_state.ultimo_smiles = ""
 if 'stato_app' not in st.session_state: st.session_state.stato_app = "input" 
 if 'parametri' not in st.session_state: st.session_state.parametri = {}
@@ -74,6 +68,7 @@ def calcola_proprieta(mol):
         'mol_h': mol_h, 'mol_no_h': mol
     }
 
+@st.cache_data
 def ottieni_nomi_pubchem(smiles):
     try:
         url_iupac = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{requests.utils.quote(smiles)}/property/IUPACName/JSON"
@@ -83,7 +78,8 @@ def ottieni_nomi_pubchem(smiles):
         res_syn = requests.get(url_syn, timeout=5)
         comune = res_syn.json()['InformationList']['Information'][0]['Synonym'][0] if res_syn.status_code == 200 else "N/D"
         return iupac, comune
-    except Exception: return "Errore connessione", "Errore connessione"
+    except requests.exceptions.RequestException: 
+        return "Errore connessione", "Errore connessione"
 
 def analizza_stereochimica(mol):
     Chem.AssignStereochemistry(mol, cleanIt=True, force=True, flagPossibleStereoCenters=True)
@@ -612,23 +608,56 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                         if coupled: break
                     if coupled: cross_peaks_idx.add((i, j))
             
+            # --- AGGIORNAMENTO VETTORIALIZZATO (32nd evaluation float32) ---
             n_pts = 600
-            x_grid = np.linspace(x_range[0], x_range[1], n_pts)
+            x_grid = np.linspace(x_range[0], x_range[1], n_pts, dtype=np.float32)
             X, Y = np.meshgrid(x_grid, x_grid)
-            Z = np.zeros_like(X)
-            gamma_2d = 0.015 * (500.0 / freq)
+            gamma_2d = np.float32(0.015 * (500.0 / freq))
             gamma_1d = gamma_base
 
+            diag_shifts = []
+            diag_ints = []
             for sig in signals:
                 if not sig.get('is_exchangeable', False):
                     for p_shift, p_int in sig['sub_peaks']:
-                        Z += p_int / (1.0 + ((X - p_shift)/gamma_2d)**2 + ((Y - p_shift)/gamma_2d)**2)
+                        diag_shifts.append(p_shift)
+                        diag_ints.append(p_int)
+
+            if diag_shifts:
+                d_shifts_arr = np.array(diag_shifts, dtype=np.float32)[:, None, None]
+                d_ints_arr = np.array(diag_ints, dtype=np.float32)[:, None, None]
+                Z_diag = np.sum(
+                    d_ints_arr / (1.0 + ((X - d_shifts_arr) / gamma_2d)**2 + ((Y - d_shifts_arr) / gamma_2d)**2),
+                    axis=0
+                )
+            else:
+                Z_diag = np.float32(0.0)
+
+            cp_px = []
+            cp_py = []
+            cp_ints = []
             for i, j in cross_peaks_idx:
                 sigA, sigB = signals[i], signals[j]
                 for px, px_int in sigA['sub_peaks']:
                     for py, py_int in sigB['sub_peaks']:
-                        Z += (px_int * py_int * 0.3) / (1.0 + ((X - px)/gamma_2d)**2 + ((Y - py)/gamma_2d)**2)
-                        Z += (px_int * py_int * 0.3) / (1.0 + ((X - py)/gamma_2d)**2 + ((Y - px)/gamma_2d)**2)
+                        cp_px.append(px)
+                        cp_py.append(py)
+                        cp_ints.append(px_int * py_int * 0.3)
+
+            if cp_px:
+                cp_px_arr = np.array(cp_px, dtype=np.float32)[:, None, None]
+                cp_py_arr = np.array(cp_py, dtype=np.float32)[:, None, None]
+                cp_ints_arr = np.array(cp_ints, dtype=np.float32)[:, None, None]
+
+                Z_cross_1 = cp_ints_arr / (1.0 + ((X - cp_px_arr) / gamma_2d)**2 + ((Y - cp_py_arr) / gamma_2d)**2)
+                Z_cross_2 = cp_ints_arr / (1.0 + ((X - cp_py_arr) / gamma_2d)**2 + ((Y - cp_px_arr) / gamma_2d)**2)
+                
+                Z_cross = np.sum(Z_cross_1 + Z_cross_2, axis=0)
+            else:
+                Z_cross = np.float32(0.0)
+
+            Z = Z_diag + Z_cross
+            # ---------------------------------------------------------------
 
             fig_cosy = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.2, 0.8], vertical_spacing=0.01)
             fig_cosy.add_trace(go.Scatter(x=x_ppm, y=y_intensity, mode='lines', line=dict(color=BORDEAUX, width=1.5), hoverinfo='skip', showlegend=False), row=1, col=1)
@@ -824,3 +853,4 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
 
             st.markdown("---")
             st.download_button("Esporta Report Completo (PDF)", data=pdf_buffer.getvalue(), file_name="Report_NMR_Lab.pdf", mime="application/pdf", use_container_width=True)
+
