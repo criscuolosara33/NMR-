@@ -608,7 +608,6 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                         if coupled: break
                     if coupled: cross_peaks_idx.add((i, j))
             
-            # --- AGGIORNAMENTO VETTORIALIZZATO (32nd evaluation float32) ---
             n_pts = 600
             x_grid = np.linspace(x_range[0], x_range[1], n_pts, dtype=np.float32)
             X, Y = np.meshgrid(x_grid, x_grid)
@@ -657,17 +656,67 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
                 Z_cross = np.float32(0.0)
 
             Z = Z_diag + Z_cross
-            # ---------------------------------------------------------------
 
-            fig_cosy = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.2, 0.8], vertical_spacing=0.01)
-            fig_cosy.add_trace(go.Scatter(x=x_ppm, y=y_intensity, mode='lines', line=dict(color=BORDEAUX, width=1.5), hoverinfo='skip', showlegend=False), row=1, col=1)
-            fig_cosy.add_trace(go.Contour(z=Z, x=x_grid, y=x_grid, colorscale=[[0, 'white'], [1, BORDEAUX]], showscale=False, contours=dict(start=0.1, size=(np.max(Z) - 0.1) / 8 if np.max(Z) > 0.1 else 1, coloring='lines'), line=dict(width=1.0), hoverinfo='none'), row=2, col=1)
-            fig_cosy.add_trace(go.Scatter(x=x_range, y=x_range, mode='lines', line=dict(color='rgba(0,0,0,0.2)', dash='dash'), hoverinfo='skip', showlegend=False), row=2, col=1)
-            fig_cosy.update_layout(title=plot_title, width=800, height=900, plot_bgcolor='white', font=dict(family="Palatino, serif"), margin=dict(l=40, r=40, t=60, b=40))
+            # --- RENDERIZZAZIONE COSY OTTIMIZZATA ---
+            fig_cosy = make_subplots(
+                rows=2, cols=1, 
+                shared_xaxes=True, 
+                row_heights=[0.25, 0.75],
+                vertical_spacing=0.02
+            )
+            
+            fig_cosy.add_trace(
+                go.Scatter(x=x_ppm, y=y_intensity, mode='lines', line=dict(color=BORDEAUX, width=1.5), hoverinfo='x+y'), 
+                row=1, col=1
+            )
+            
+            fig_cosy.add_trace(
+                go.Contour(
+                    z=Z, x=x_grid, y=x_grid, 
+                    colorscale=[[0, 'white'], [1, BORDEAUX]], 
+                    showscale=False, 
+                    contours=dict(start=0.1, size=(np.max(Z) - 0.1) / 8 if np.max(Z) > 0.1 else 1, coloring='lines'), 
+                    line=dict(width=1.5), 
+                    hoverinfo='x+y'
+                ), 
+                row=2, col=1
+            )
+            
+            fig_cosy.add_trace(
+                go.Scatter(x=x_range, y=x_range, mode='lines', line=dict(color='rgba(0,0,0,0.3)', dash='dash'), hoverinfo='skip'), 
+                row=2, col=1
+            )
+            
+            fig_cosy.update_layout(
+                title=plot_title, 
+                width=900, height=900, 
+                plot_bgcolor='white', 
+                font=dict(family="Palatino, serif"), 
+                margin=dict(l=40, r=40, t=60, b=40),
+                hovermode="closest",
+                dragmode="zoom",
+                showlegend=False
+            )
+            
             fig_cosy.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, row=1, col=1)
-            fig_cosy.update_xaxes(autorange="reversed", showgrid=True, gridcolor='#E0E0E0', row=1, col=1)
-            fig_cosy.update_xaxes(title_text="Chemical Shift δ (ppm)", autorange="reversed", showgrid=True, gridcolor='#E0E0E0', row=2, col=1)
-            fig_cosy.update_yaxes(title_text="Chemical Shift δ (ppm)", autorange="reversed", scaleanchor="x2", scaleratio=1, showgrid=True, gridcolor='#E0E0E0', row=2, col=1)
+            fig_cosy.update_xaxes(autorange="reversed", showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
+            
+            fig_cosy.update_xaxes(
+                title_text="F2 - Chemical Shift δ (ppm)", 
+                autorange="reversed", 
+                showgrid=True, gridcolor='#E0E0E0', 
+                showspikes=True, spikemode="toaxis+across", spikethickness=1, spikedash="dot", spikecolor="gray",
+                row=2, col=1
+            )
+            fig_cosy.update_yaxes(
+                title_text="F1 - Chemical Shift δ (ppm)", 
+                autorange="reversed", 
+                scaleanchor="x", scaleratio=1,
+                showgrid=True, gridcolor='#E0E0E0', 
+                showspikes=True, spikemode="toaxis+across", spikethickness=1, spikedash="dot", spikecolor="gray",
+                row=2, col=1
+            )
+            
             st.plotly_chart(fig_cosy, use_container_width=True)
             
         else:
@@ -853,4 +902,3 @@ elif st.session_state.stato_app in ["calcolo_1h", "calcolo_13c", "calcolo_cosy"]
 
             st.markdown("---")
             st.download_button("Esporta Report Completo (PDF)", data=pdf_buffer.getvalue(), file_name="Report_NMR_Lab.pdf", mime="application/pdf", use_container_width=True)
-
